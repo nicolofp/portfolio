@@ -1,0 +1,50 @@
+---
+title: "Heart rate recovery analysis"
+subtitle: "Application of Bayesian Non-Linear Mixed effect models"
+author: "Nicol&oacute; Foppa Pedretti"
+format: 
+  html:
+    fontsize: smaller
+    number-sections: true
+    embed-resources: true
+bibliography: reference_gps.bib
+csl: ieee.csl
+---
+
+## Introduction
+
+The advent of wearable technology, such as heart rate watches, has revolutionized the way individuals monitor and optimize their fitness and health. These devices provide continuous, real-time data on heart rate, offering valuable insights into cardiovascular responses during and after physical activity. This analysis aims to model the heart rate decrease following a standardized workout, a key indicator of cardiovascular recovery and fitness level. By leveraging heart rate data, we seek to understand how factors such as the number of training sessions in the past two weeks influence the rate of heart rate recovery. This study will explore the interplay between training frequency and recovery dynamics, providing a foundation for personalized fitness recommendations and enhanced training protocols. Through statistical modeling, we aim to uncover patterns that can inform athletes, coaches, and fitness enthusiasts about optimizing workout regimens for improved performance and health outcomes.
+
+## Experiment and data collection
+
+Heart rate data were collected (on a single individual over months of training sessions) using a wearable heart rate watch immediately following a 30-minute running session on a treadmill. The standardized workout comprised three phases: the first 15 minutes at 6.5 miles per hour, the next 10 minutes at 7.0 miles per hour, and the final 5 minutes at 7.5 miles per hour. Data collection began at the instant the 30-minute workout concluded (time t=0) and continued for the subsequent 5 to 20 minutes post-exercise, capturing the heart rate recovery phase. The wearable watch, equipped with an optical heart rate sensor, was configured to record heart rate data at a 5-second granularity, yielding 12 measurements per minute (60 seconds ÷ 5 seconds). Over the 15-minute recovery window (from 5 to 20 minutes, or 900 seconds), this resulted in 180 data points (900 seconds ÷ 5 seconds). The watch was securely worn on the wrist to ensure accurate and consistent measurements, with data stored locally on the device and later exported for analysis. Timestamps were aligned to the end of the workout to precisely track the heart rate decrease during the recovery period, enabling detailed analysis of cardiovascular recovery dynamics following the standardized treadmill session.
+
+## Statistical model 
+
+To model the heart rate decrease during the recovery phase following a 30-minute standardized treadmill running session, we adopted a non-linear mixed effects (NLME) model, informed by peer-reviewed literature on heart rate recovery dynamics (See [@https://doi.org/10.1111/anec.12061], [@doi:10.1056/NEJM199910283411804], [@ASystematicReviewonHeartRateRecoverytoMonitorChangesinTrainingStatusinAthletes], [@Facioli2021], [@daFonseca2024]). The recovery phase, spanning from 0 to 20 minutes post-exercise with heart rate data collected at 5-second intervals, exhibits a non-linear decay pattern, as heart rate typically decreases rapidly initially and then stabilizes over time. This non-linear behavior, combined with inter-session variability (e.g., due to fitness levels or training frequency) and the hierarchical nature of the data (repeated measurements within sessions), makes an NLME model suitable. Peer-reviewed studies, such as those in exercise physiology, highlight NLME models as effective for capturing both individual-level trends and session-specific variations in heart rate recovery, accounting for factors like the number of training sessions in the past two weeks.
+
+The NLME model can be expressed as follows:
+
+$$y_{ij} = f(x_{ij}, \boldsymbol{\beta}, \boldsymbol{b}_i) + \epsilon_{ij}$$
+
+where:
+
++ $y_{ij}$: Heart rate measurement for individual $i$ at time point $j$,
++ $f(x_{ij}, \boldsymbol{\beta}, \boldsymbol{b}_i)$: Non-linear function describing the heart rate recovery trajectory, dependent on time $x_{ij}$, fixed effect parameters $\boldsymbol{\beta}$, and individual-specific random effects $\boldsymbol{b}_i$,
++ $\boldsymbol{b}_i \sim N(0, \boldsymbol{\Psi})$: Random effects vector, assumed to follow a multivariate normal distribution with covariance matrix $\boldsymbol{\Psi}$,
++ $\epsilon_{ij} \sim N(0, \sigma^2)$: Residual error, assumed to be normally distributed with variance $\sigma^2$.
+
+## R code
+
+See [@michaelfrankeBayesianRegression]
+
+
+
+
+## References
+
+::: {#refs}
+:::
+
+
+

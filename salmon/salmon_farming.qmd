@@ -1,0 +1,120 @@
+---
+title: "Salmon farming model"
+subtitle: "Using Ordinary Differential Equation (ODE) with STAN to model the salmon farming dynamics"
+author: "Nicol&oacute; Foppa Pedretti"
+format: 
+  html:
+    fontsize: smaller
+    number-sections: true
+    embed-resources: true
+bibliography: pericles_1099075534.bib
+csl: ieee.csl
+---
+
+## Introduction
+
+This model describes the dynamics of a salmon population in an aquaculture setting, accounting for growth, mortality, and harvesting based on a Gaussian weight distribution. Harvesting targets salmon with weights $w \geq 5\text{kg}$. The model tracks the remaining population (number ($N$), mean weight ($W$), variance ($V$)) and the cumulative harvested population (number ($N_{\text{h}}$), mean weight ($W_{\text{h}}$), variance ($V_{\text{h}}$)), along with some parameters (mortality rate ($\mu$), growth rate ($g_r$)). The total biomass is computed as $B = N \cdot W$.
+
+Variables:
+
++ Remaining Population:
+    + $N(t)$: Number of salmon (dimensionless)
+    + $W(t)$: Mean weight of remaining salmon (kg)
+    + $V(t)$: Variance of remaining salmon weights (kg^2^)
++ Harvested Population:
+    + $N_{\text{h}}$: Cumulative number of h salmon (dimensionless)
+    + $W_{\text{h}}$: Cumulative mean weight of h salmon (kg)
+    + $V_{\text{h}}$: Cumulative variance of h salmon weights ((kg^2^)
+
+The derived output is the total biomass of remaining salmon (kg), $B(t) = N(t) \cdot W(t)$. See [@https://doi.org/10.1002/aqc.4142], [@doi:10.1098/rsos.160152], [@PINCINATO2021736034]
+
+## Assumptions
+
++ The initial salmon weight will follow a normal distribution with a specified mean ($\mu_0$) and standard deviation ($\sigma_0$), and harvesting will target salmon above 5kg based on this distribution. Since modeling a full size distribution typically requires **partial differential equations (PDEs)** for continuous weight classes, we’ll approximate the size structure with a simplified ODE system by tracking the moments of the distribution.
+
++ Assume the weight distribution remains approximately Gaussian over time, $W(t) \sim \mathcal{N}(W(t), V(t))$, where $W(t)$ is the mean and $\sqrt{V(t)}$ is the standard deviation.
+
++ Harvesting removes salmon with $w \geq 5$, calculated using the cumulative distribution function (CDF) of the normal distribution:
+$$\text{Fraction harvested} = P(w \geq 5) = 1 - \Phi\left(\frac{5 - W(t)}{\sqrt{V(t)}}\right) \qquad \text{where } \Phi \text{ is the standard normal CDF.}$$
+
++ Harvesting affects $N$, $W$, and $V$, as larger salmon are removed, shifting the mean and variance.
+
++ We express the post-harvest mean weight ($W_{\text{post}}$) and variance ($V_{\text{post}}$) as the conditional mean and variance of a Gaussian distribution truncated below 5kg because harvesting removes salmon with weights $w \geq 5\text{kg}$, leaving only those with $w<5\text{kg}$. We need to compute the mean and variance of this truncated Gaussian distribution for the remaining population (see @sec-appx for additional context)
+
++ In order to include the mean and variance of the harvested salmon weights as state variables in the salmon harvesting model, we need to track the mean weight ($W_{\text{harvested}}$) and variance ($V_{\text{harvested}}$) of the salmon with weights $w \geq 5\text{kg}$ over time. These new state variables will represent the cumulative mean and variance of the harvested salmon, updated as harvesting occurs. Since harvesting is a continuous process in the ODE system, we’ll model the dynamics of $W_{\text{harvested}}$ and $V_{\text{harvested}}$ by accumulating the contributions of harvested salmon, weighted by the harvesting rate. New State Variables: $W_{\text{harvested}}(t)$ (mean weight in kg of all salmon harvested up to time t), $V_{\text{harvested}}$ (variance of weights in kg^2^ of all salmon harvested up to time t). However we face some challenges because
+harvesting is modeled as a continuous rate, so $W_{\text{harvested}}$ and $V_{\text{harvested}}$ represent the average properties of the cumulative harvested population. The instantaneous mean and variance of harvested salmon at time t are given by the truncated Gaussian $w \geq 5$, but we need to track their cumulative effect. As a solution we introduce ODEs for the two parameters that update based on the instantaneous harvested mean and variance, we use an auxiliary state variable $$\frac{dN_{\text{harvested}}}{dt} = h \left[ 1 - \Phi\left(\frac{5 - W}{\sqrt{V}}\right) \right] N$$ to track the cumulative number of harvested salmon, which helps normalize the mean and variance calculations.
+
+
++ The instantaneous mean and variance of harvested salmon at time t, given $\alpha = \frac{5 - W(t)}{\sqrt{V(t)}}$, are: $$W_{\text{inst}}(t) = W(t) + \sqrt{V(t)} \cdot \frac{\phi(\alpha)}{1 - \Phi(\alpha)} \qquad \qquad V_{\text{inst}}(t) = V(t) \left[ 1 + \frac{\phi(\alpha) \cdot \alpha}{1 - \Phi(\alpha)} - \left( \frac{\phi(\alpha)}{1 - \Phi(\alpha)} \right)^2 \right]$$ which lead to \begin{array}{l}
+\frac{dW_{\text{harvested}}}{dt} = \frac{h \left[ 1 - \Phi\left(\frac{5 - W}{\sqrt{V}}\right) \right] N (W_{\text{inst}} - W_{\text{harvested}})}{N_{\text{harvested}} + \epsilon} \\
+\frac{dV_{\text{harvested}}}{dt} = \frac{h \left[ 1 - \Phi\left(\frac{5 - W}{\sqrt{V}}\right) \right] N [V_{\text{inst}} + (W_{\text{inst}} - W_{\text{harvested}})^2 - V_{\text{harvested}}]}{N_{\text{harvested}} + \epsilon}
+\end{array}
+
+
+
+
+
+## Equation
+
+\begin{array}{l}
+\frac{dN}{dt} = -(\mu + h_r)N \\
+\frac{dW}{dt} = g_r\left(1 - \frac{W}{W_{max}} \right) - h_r(W-W_{post}) \\ 
+\frac{dV}{dt} = \sigma^2_gg_r - h_r(V-V_{post}) \\ 
+\frac{dN_{\text{h}}}{dt} = h_r N \\
+\frac{dW_{\text{h}}}{dt} = \frac{h_r N (W_{\text{inst}} - W_{\text{h}})}{N_{\text{h}} + \epsilon} \\
+\frac{dV_{\text{h}}}{dt} = \frac{h_r N [V_{\text{inst}} + (W_{\text{inst}} - W_{\text{h}})^2 - V_{\text{h}}]}{N_{\text{h}} + \epsilon},
+\end{array}
+
+## References
+
+::: {#refs}
+:::
+
+## Appendix {#sec-appx}
+
+### Truncated Gaussian Distribution
+For a Gaussian random variable $w \sim \mathcal{N}(\mu, \sigma^2)$, truncated to $w < a$, the probability density function of the truncated distribution is:
+
+$$f(w|w < a) = \frac{\frac{1}{\sqrt{2 \pi \sigma^2}} \exp \left( - \frac{(w-\mu)^2}{2\sigma^2} \right) }{\Phi \left( \frac{a-\mu}{\sigma} \right)} \quad \text{for } w < a$$
+
+where $\Phi(z)$ is the standard normal CDF, and the denominator $\Phi\left(\frac{a - \mu}{\sigma}\right) = P(w < a)$ is the probability of $w < a$.
+In our case:
+
++ $\Phi(z) = \frac{1}{\sqrt{2\pi}} \int^{z}_{-\infty} e^{\frac{-u^2}{2}}du$
+
++ $\mu = W(t)$: Mean weight before harvesting
+
++ $\sigma^2 = V(t)$: Variance before harvesting
+
++ $a=5$: Truncation point (harvest salmon with $w \geq 5$)
+
+Let’s define:
+
++ $\alpha = \frac{a - \mu}{\sigma} = \frac{5 - W(t)}{\sqrt{V(t)}}$: Standardized truncation point
+
++ $\phi(z) = \frac{1}{\sqrt{2\pi}} \exp\left(-\frac{z^2}{2}\right)$: Standard normal PDF
+
++ $\Phi(\alpha) = P(z < \alpha)$: CDF at $\alpha$
+
+The fraction of salmon remaining after harvesting is $\Phi(\alpha)$, and the fraction harvested is $1 - \Phi(\alpha)$.
+
+#### Conditional Mean ($W_{\text{post}}$)
+
+The mean of a Gaussian distribution truncated at $w < a$, substituting $\mu = W(t)$, $\sigma = \sqrt{V(t)}$, $a = 5$ and $\alpha = \frac{5 - W(t)}{\sqrt{V(t)}}$ is:
+
+$$\mathbb{E}[w|w<a] = \mu - \sigma \frac{\phi \left( \frac{a-\mu}{\sigma}\right)}{\Phi \left( \frac{a-\mu}{\sigma}\right)} \quad \longrightarrow \quad W_{\text{post}} = W(t) - \sqrt{V(t)} \frac{\phi \left( \frac{5-W(t)}{\sqrt{V(t)}}\right)}{\Phi \left( \frac{5-W(t)}{\sqrt{V(t)}}\right)} \quad \longrightarrow \quad W_{\text{post}} = W(t) - \sqrt{V(t)} \frac{\phi(\alpha)}{\Phi(\alpha)}$$
+
+The term $\frac{\phi(\alpha)}{\Phi(\alpha)}$ is the hazard function (or inverse **Mills ratio**) for the standard normal, which adjusts the mean downward since larger weights are removed.
+
+#### Conditional Variance ($V_{\text{post}}$)
+
+The variance of the truncated Gaussian $w < a$, substituting $\sigma^2 = V(t)$, $\mu = W(t)$, $a=5$, and $\alpha = \frac{5 - W(t)}{\sqrt{V(t)}}$ is:
+
+$$Var[w|w<a] = \sigma^2 \left[ 1 - \frac{\phi \left( \frac{a-\mu}{\sigma}\right)  \frac{a-\mu}{\sigma}}{\Phi \left( \frac{a-\mu}{\sigma}\right)} - \left( \frac{\phi \left( \frac{a-\mu}{\sigma}\right)}{\Phi \left( \frac{a-\mu}{\sigma}\right)} \right)^2 \right] \qquad \longrightarrow \qquad V_{\text{post}} = V(t) \left[ 1 - \frac{\phi(\alpha) \alpha}{\Phi(\alpha)} - \left( \frac{\phi(\alpha)}{\Phi(\alpha)} \right)^2 \right]$$
+This expression accounts for the reduced variance after removing the upper tail of the distribution. Behavior:
+
++ If $W \ll 5$, $\alpha$ is large, $\Phi(\alpha) \approx 1$, $\phi(\alpha) \approx 0$, $W_{\text{post}} \approx W$,$V_{\text{post}} \approx V$, as few salmon are harvested.
+
++ If $W \gg 5$, $\alpha$ is negative and large, $\Phi(\alpha) \approx 0$, harvesting dominates, but $W_{\text{post}}$ and $V_{\text{post}}$ stabilize to values reflecting the truncated distribution.
+
+Numerical Stability: Ensure $V > 0$ to avoid division by zero in $\alpha$. In practice, $V_{\text{post}}$ is always positive but smaller than (V).
