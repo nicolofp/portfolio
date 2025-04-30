@@ -1,12 +1,19 @@
+# Load R library to run model and 
+# handle dataset
 library(data.table)
 library(bayesplot)
 library(cmdstanr)
 library(jsonlite)
 library(ggplot2)
+library(arrow)
 library(brms)
 
-list_data = list.files("G:/My Drive/Temporary/gps_20250419/activities/",full.names = T)
+# Load the names of the files 
+list_data = list.files("G:/My Drive/Temporary/gps_20250419/activities/",
+                       full.names = T)
 
+# Data from gps watch are in json format 
+# per training session
 data_training = lapply(list_data, function(i){
   print(i)
   x = read_json(i)
@@ -18,42 +25,56 @@ data_training = lapply(list_data, function(i){
   }else{ NULL }
 })
 data_training = rbindlist(data_training)
+
+# Let's filter the data starting from the experiment date
+# and create an indicator to understand which is the second
+# of the training where the hr hit the highest value
 data_training_red = data_training[date > "2022-12-04" & id > 1780]
 data_training_red[, hr_max := max(hr), by = date]
 data_training_red[, is_hr_max := ifelse(hr == hr_max,1,0)]
 
+# Create the date list that are suitable for our analysis
 training_date = data_training_red[,.(which(is_hr_max == 1),min(hr)), 
-                              by = date][V1 < 10 & date != "2023-03-18" & date != "2023-03-20", 
-                                         date]
+                              by = date][V1 < 10 & date != "2023-03-18" & 
+                                           date != "2023-03-20",date]
 
+# Filter other sessions based on visual analysis
 dt = data_training_red[date %in% training_date]
 dt = dt[date %in% dt[id == 1785 & hr > 150,date]]
 dt = dt[!(date %in% dt[id < 2250 & hr < 75,date])]
 
-# Covariates month and number of running session in the previous 2w
+# Create covariate: number of running session in the previous 2weeks
+# and merge the dataset with the main one
 cov1 = lapply(sort(unique(dt$date)), function(i){
   tmp = sum(sort(unique(dt$date)) %between% c(as.Date(i-14),as.Date(i-1)))
   data.table(date = i, month = month(i), N_train = tmp)
 })
 cov1 = rbindlist(cov1)
 dt = merge(dt,cov1,by = "date")
+
+# Filter the training session 
+# and transform it in minutes
 dt = dt[id >= 1800]
 dt[, time := (id-1800)/60]
-dt[,':='(month = as.factor(month))]
 
+# Select only the data every 30 seconds
+# exclude the onservation which have less than 
+# 10 observation (5 minutes)
 dt_test = dt[time %in% seq(0,15,0.5)]  
 date_exclude = dt_test[,.N, by = date][N<10,date]
 dt_test = dt_test[!(date %in% date_exclude)]
 
+# Save the dataset in parquet format
+write_parquet(dt_test, "nlme_gps/dataset.parquet")
 
+dt_test = read_parquet("nlme_gps/dataset.parquet")
 ggplot(dt_test) +
   geom_line(aes(x = time, y = hr, group = date), alpha = 0.3) +
-  geom_function(fun = function(x) 95 * exp(-0.32*x) + 92.43, 
-                col = "red", linewidth = 1)
+  geom_smooth(aes(x = time, y = hr))
 
 fit_exponential <- brms::brm(
   formula = brms::bf(hr ~ a * exp(-exp(logb) * time) + k, 
-                     a + logb ~ 1 + N_train + (1 | date), 
+                     a + logb ~ 1 + N_train + (1 | date),
                      k ~ 1,
                      nl=TRUE),
   data = dt_test,
@@ -74,7 +95,7 @@ fit_exponential <- brms::brm(
               prior(normal(90,1), nlpar = "k", lb = 0)),
   control = list(adapt_delta = 0.99,
                  max_treedepth = 15),
-  file = "fit_exp_re_cov.rds"
+  file = "nlme_gps/fit_exp_re_cov.rds"
 )
 
 mcmc_acf(fit_exponential)
@@ -84,11 +105,11 @@ mcmc_trace(fit_exponential)
 bayes_R2(fit_exponential)
 bayes_R2(fit_power)
 
-
-saveRDS(fit_exponential,"fit_exp_good1.rds")
+fit_exponential = readRDS("nlme_gps/fit_exp_re_cov.rds")
 plot(conditional_effects(fit_exponential), ask = FALSE)
 mcmc_plot(fit_exponential)
 
+loo(fit_exponential)
 
 dt_test = dt[date %in% unique(dt$date)[c(6)] & 
   time %in% seq(0,15,0.5)]  

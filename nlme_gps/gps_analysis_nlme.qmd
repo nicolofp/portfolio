@@ -36,7 +36,31 @@ where:
 
 ## R code
 
-See [@michaelfrankeBayesianRegression]
+To analyze the heart rate recovery data and model the non-linear decrease following the standardized treadmill workout, we will utilize the R programming environment in conjunction with the `brms` package, which interfaces with Stan for Bayesian statistical modeling. This approach enables robust fitting of the non-linear mixed effects model, leveraging Stan’s powerful Markov Chain Monte Carlo (MCMC) sampling to estimate model parameters while accounting for both fixed and random effects. The brms package provides a user-friendly framework to specify complex models, incorporate covariates such as the number of training sessions in the past two weeks, and handle the hierarchical structure of the data efficiently. See [@michaelfrankeBayesianRegression]
+
+```{r}
+library(data.table)
+library(bayesplot)
+library(cmdstanr)
+library(ggplot2)
+library(arrow)
+library(brms)
+```
+
+
+```{r}
+dt_test = read_parquet("nlme_gps/dataset.parquet")
+ggplot(dt_test) +
+  geom_line(aes(x = time, y = hr, group = date), alpha = 0.3) +
+  geom_smooth(aes(x = time, y = hr)) +
+  labs(title = "Experimental data") + 
+  xlab("Heart Rate") + ylab("Time (min)") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+```
+
+
+
 
 
 
