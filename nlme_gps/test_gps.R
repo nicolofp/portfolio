@@ -67,36 +67,8 @@ dt_test = dt_test[!(date %in% date_exclude)]
 # Save the dataset in parquet format
 write_parquet(dt_test, "nlme_gps/dataset.parquet")
 
-dt_test = read_parquet("nlme_gps/dataset.parquet")
-ggplot(dt_test) +
-  geom_line(aes(x = time, y = hr, group = date), alpha = 0.3) +
-  geom_smooth(aes(x = time, y = hr))
 
-fit_exponential <- brms::brm(
-  formula = brms::bf(hr ~ a * exp(-exp(logb) * time) + k, 
-                     a + logb ~ 1 + N_train + (1 | date),
-                     k ~ 1,
-                     nl=TRUE),
-  data = dt_test,
-  cores = 4,
-  backend = "cmdstan",
-  init = replicate(4,list(b_a_Intercept = 95       # Fixed intercept for a
-                          ,b_a_N_train = 0         # Effect of N_train on a
-                          ,b_b_Intercept = 0
-                          ,b_b_N_train = 0
-                          ,b_k_Intercept = 90
-                          ), 
-                   simplify = F),
-  seed = 85538,
-  prior   = c(prior(normal(96,1), nlpar = "a", coef="Intercept"),
-              prior(normal(0,1), nlpar = "a", coef="N_train"),
-              prior(normal(0,1), nlpar = "logb", coef="Intercept"),
-              prior(normal(0,1), nlpar = "logb", coef="N_train"),
-              prior(normal(90,1), nlpar = "k", lb = 0)),
-  control = list(adapt_delta = 0.99,
-                 max_treedepth = 15),
-  file = "nlme_gps/fit_exp_re_cov.rds"
-)
+
 
 mcmc_acf(fit_exponential)
 mcmc_dens(fit_exponential)

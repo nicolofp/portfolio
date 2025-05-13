@@ -34,12 +34,31 @@ where:
 + $\boldsymbol{b}_i \sim N(0, \boldsymbol{\Psi})$: Random effects vector, assumed to follow a multivariate normal distribution with covariance matrix $\boldsymbol{\Psi}$,
 + $\epsilon_{ij} \sim N(0, \sigma^2)$: Residual error, assumed to be normally distributed with variance $\sigma^2$.
 
+The negative exponential shape function was chosen because heart rate recovery typically exhibits a rapid initial decline followed by a slower stabilization, a pattern well-captured by this form. Peer-reviewed studies in exercise physiology support its use, as it effectively models the physiological process of cardiovascular recovery. Additionally, its parameters allow interpretable insights into amplitude, decay rate, and asymptotic heart rate, aligning with the data’s non-linear dynamics. The model for heart rate recovery is specified as:
+$$y_{ij} = a_i \cdot \exp(-b_i \cdot t_{ij}) + k + \epsilon_{ij}$$
+where:
+
++ $y_{ij}$: heart rate measurement for session $i$ at time point $j$
++ $t_{ij}$: time since the end of the workout for session $i$ at measurement $j$
++ $a_i = \alpha_0 + \alpha_1 \cdot \text{training}_i + u_i$: amplitude parameter for session $i$, with $\alpha_0$ as the fixed intercept, $\alpha_1$ as the fixed effect of the number of training sessions in the previous two weeks ($\text{training}_i$), and $u_i \sim N(0, \sigma_u^2)$ as the random intercept for session $i$
++ $b_i = \beta_0 + \beta_1 \cdot \text{training}_i + v_i$: decay rate parameter for session $i$, with $\beta_0$ as the fixed intercept and $\beta_1$ as the fixed effect of the number of training sessions in the previous two weeks ($\text{training}_i$), and $v_i \sim N(0, \sigma_u^2)$ as the random intercept for session $i$
++ $k$: Asymptotic heart rate, assumed constant across sessions,
++ $\epsilon_{ij} \sim N(0, \sigma^2)$: residual error, assumed normally distributed with variance $\sigma^2$
+
+This model captures the non-linear heart rate recovery trajectory, incorporating the effect of training frequency as a fixed effect and session-specific variability through a random intercept.
+
 ## R code
 
-To analyze the heart rate recovery data and model the non-linear decrease following the standardized treadmill workout, we will utilize the R programming environment in conjunction with the `brms` package, which interfaces with Stan for Bayesian statistical modeling. This approach enables robust fitting of the non-linear mixed effects model, leveraging Stan’s powerful Markov Chain Monte Carlo (MCMC) sampling to estimate model parameters while accounting for both fixed and random effects. The brms package provides a user-friendly framework to specify complex models, incorporate covariates such as the number of training sessions in the past two weeks, and handle the hierarchical structure of the data efficiently. See [@michaelfrankeBayesianRegression]
+To analyze the heart rate recovery data and model the non-linear decrease following the standardized treadmill workout, we will utilize the R programming environment in conjunction with the `brms` package, which interfaces with Stan for Bayesian statistical modeling. This approach enables robust fitting of the non-linear mixed effects model, leveraging Stan’s powerful Markov Chain Monte Carlo (MCMC) sampling to estimate model parameters while accounting for both fixed and random effects. The brms package provides a user-friendly framework to specify complex models, incorporate covariates such as the number of training sessions in the past two weeks, and handle the hierarchical structure of the data efficiently. See [@michaelfrankeBayesianRegression].
+
+We load useful R libraries to handle data and bayesian model: 
 
 ```{r}
+#| message: false
+#| warning: false
+
 library(data.table)
+library(gridExtra)
 library(bayesplot)
 library(cmdstanr)
 library(ggplot2)
@@ -47,28 +66,95 @@ library(arrow)
 library(brms)
 ```
 
+We visualize the experimental data that are used for the statistical model 
 
 ```{r}
-dt_test = read_parquet("nlme_gps/dataset.parquet")
-ggplot(dt_test) +
+#| fig-align: center
+#| fig-width: 10
+#| fig-height: 4
+#| message: false
+#| warning: false
+
+dt_test = read_parquet("dataset.parquet")
+t1 = ggplot(dt_test) +
   geom_line(aes(x = time, y = hr, group = date), alpha = 0.3) +
   geom_smooth(aes(x = time, y = hr)) +
   labs(title = "Experimental data") + 
-  xlab("Heart Rate") + ylab("Time (min)") +
+  ylab("Heart Rate") + xlab("Time (min)") +
   theme_bw() +
   theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+t2 = ggplot(dt_test) +
+  geom_boxplot(aes(x = as.factor(time), y = hr), fill = "#69b3a2",alpha = 0.3) +
+  labs(title = "Experimental data") + 
+  scale_x_discrete(breaks = seq(0,15)) +
+  ylab("Heart Rate") + xlab("Time (min)") +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16))
+
+grid.arrange(t1,t2,ncol = 2)
 ```
 
+In this block we have the code for the bayesian no-linear mixed effect model. We leverage STAN bayesian framework through `brms` package. The coefficient $b$ need to be positive (in order to have $-b$ always negative) but the intercept and coefficient of $\text{training}_i$ can be positive or negative, for this reason we estimate the $log(b)$ and then we exponentiate the variable `logb` to get our final results. We select priors and the initial points based on literature and data observations.
 
+```{r}
+#| eval: false
+#| message: false
+#| warning: false
 
+fit_exponential <- brms::brm(
+  formula = brms::bf(hr ~ a * exp(-exp(logb) * time) + k, 
+                     a + logb ~ 1 + N_train + (1 | date),
+                     k ~ 1,
+                     nl=TRUE),
+  data = dt_test,
+  cores = 4,
+  backend = "cmdstan",
+  init = replicate(4,list(b_a_Intercept = 95       # Fixed intercept for a
+                          ,b_a_N_train = 0         # Effect of N_train on a
+                          ,b_b_Intercept = 0
+                          ,b_b_N_train = 0
+                          ,b_k_Intercept = 90
+                          ), 
+                   simplify = F),
+  seed = 85538,
+  prior   = c(prior(normal(96,1), nlpar = "a", coef="Intercept"),
+              prior(normal(0,1), nlpar = "a", coef="N_train"),
+              prior(normal(0,1), nlpar = "logb", coef="Intercept"),
+              prior(normal(0,1), nlpar = "logb", coef="N_train"),
+              prior(normal(90,1), nlpar = "k", lb = 0)),
+  control = list(adapt_delta = 0.99,
+                 max_treedepth = 15),
+  file = "nlme_gps/fit_exp_re_cov.rds"
+)
+```
 
+Let's see the results of the analysis
 
+```{r}
+#| echo: false
+
+fit_exponential = readRDS("fit_exp_re_cov.rds")
+```
+
+```{r}
+fit_exponential
+```
+The model implemented demonstrates robust convergence with all `Rhat` values at or very close to 1.0. The model characterizes an exponential decay function with a Gaussian distribution, revealing a baseline parameter estimate of 94.25 (95% CI: 92.55-96.00) that exhibits a significant negative effect (-1.09, 95% CI: -1.70 to -0.51) proportional to the number pf training in the previous 14 days. The log decay rate is estimated at -0.95 (95% CI: -1.06 to -0.84), with minimal influence from training in the previous 14 days(-0.01, 95% CI: -0.04 to 0.02). The response asymptotes at approximately 92.74 (95% CI: 92.11-93.34). Notable random effects include substantial between-date variability in the baseline parameter (SD=6.27) and moderate variability in decay rate (SD=0.27), while the residual standard deviation is 7.26 (95% CI: 7.03-7.50). All parameters demonstrate adequate effective sample sizes for reliable estimation.
 
 
 ## References
 
 ::: {#refs}
 :::
+
+## Appendix
+
+```{r}
+# mcmc_acf(fit_exponential)
+# mcmc_dens(fit_exponential)
+# mcmc_trace(fit_exponential)
+```
 
 
 
