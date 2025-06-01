@@ -140,7 +140,7 @@ fit_exponential = readRDS("fit_exp_re_cov.rds")
 ```{r}
 fit_exponential
 ```
-The model implemented demonstrates robust convergence with all `Rhat` values at or very close to 1.0. The model characterizes an exponential decay function with a Gaussian distribution, revealing a baseline parameter estimate of 94.25 (95% CI: 92.55-96.00) that exhibits a significant negative effect (-1.09, 95% CI: -1.70 to -0.51) proportional to the number pf training in the previous 14 days. The log decay rate is estimated at -0.95 (95% CI: -1.06 to -0.84), with minimal influence from training in the previous 14 days(-0.01, 95% CI: -0.04 to 0.02). The response asymptotes at approximately 92.74 (95% CI: 92.11-93.34). Notable random effects include substantial between-date variability in the baseline parameter (SD=6.27) and moderate variability in decay rate (SD=0.27), while the residual standard deviation is 7.26 (95% CI: 7.03-7.50). All parameters demonstrate adequate effective sample sizes for reliable estimation.
+The model implemented demonstrates robust convergence with all `Rhat` values at or very close to 1.0. The model characterizes an exponential decay function with a Gaussian distribution, revealing a baseline parameter estimate of 94.25 (95% CI: 92.55-96.00) that exhibits a significant negative effect (-1.09, 95% CI: -1.70 to -0.51) proportional to the number pf training in the previous 14 days. The log decay rate is estimated at -0.95 (95% CI: -1.06 to -0.84), with minimal influence from training in the previous 14 days(-0.01, 95% CI: -0.04 to 0.02). The response asymptotes (not a mathematical one but it's the value where the heart rate decrease slow down) at approximately 92.74 (95% CI: 92.11-93.34). Notable random effects include substantial between-date variability in the baseline parameter (SD=6.27) and moderate variability in decay rate (SD=0.27), while the residual standard deviation is 7.26 (95% CI: 7.03-7.50). All parameters demonstrate adequate effective sample sizes for reliable estimation.
 
 
 ## References
@@ -150,11 +150,27 @@ The model implemented demonstrates robust convergence with all `Rhat` values at 
 
 ## Appendix
 
+Autocorrelation
+
 ```{r}
-# mcmc_acf(fit_exponential)
-# mcmc_dens(fit_exponential)
-# mcmc_trace(fit_exponential)
+#| warning: false
+#| message: false
+
+parameters = c("b_a_Intercept","b_a_N_train","b_logb_Intercept",
+               "b_logb_N_train","b_k_Intercept","sd_date__a_Intercept",
+               "sd_date__logb_Intercept","sigma")
+mcmc_acf(fit_exponential, pars = parameters)
 ```
 
+Posterior density
 
+```{r}
+mcmc_dens(fit_exponential, pars = parameters)
+```
+
+Traceplot after warmup
+
+```{r}
+mcmc_trace(fit_exponential, pars = parameters)
+```
 
