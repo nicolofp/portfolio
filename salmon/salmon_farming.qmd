@@ -7,7 +7,7 @@ format:
     fontsize: smaller
     number-sections: true
     embed-resources: true
-bibliography: pericles_1099075534.bib
+bibliography: salmon.bib
 csl: ieee.csl
 ---
 
