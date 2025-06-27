@@ -2,6 +2,7 @@
 title: "Salmon farming model"
 subtitle: "Using Ordinary Differential Equation (ODE) with STAN to model the salmon farming dynamics"
 author: "Nicol&oacute; Foppa Pedretti"
+date: "2025-05-11"
 format: 
   html:
     fontsize: smaller

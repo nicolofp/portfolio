@@ -1,11 +1,15 @@
 ---
 title: "Solar energy forecast"
+subtitle: "Using Julia to predict the solar energy production"
+author: "Nicol&oacute; Foppa Pedretti"
+date: "2025-06-27"
 format: 
     html:
         fontsize: smaller
         number-sections: true
         embed-resources: true
-        df-print: kable
+bibliography: solar_pred.bib
+csl: ieee.csl
 ---
 
 ## Import libraries
@@ -31,7 +35,7 @@ Our data contains information on these key factors:
 + **SystemProduction**: system production kWh 
 
 ```{julia}
-DT = CSV.read("G:/My Drive/Dati/solar_forecast/Solar Power Plant Data.csv", DataFrame);
+DT = CSV.read("Solar_Power_Plant_Data.csv", DataFrame);
 show(describe(DT),allcols = true)
 ```
 
@@ -67,8 +71,8 @@ dt = combine(df,
              "Sunshine","AirPressure",
               "Radiation","AirTemperature",
               "RelativeAirHumidity","month"] .=> [sum, mean, mean, 
-                                                            mean, mean, mean, 
-                                                            mean, mean]; 
+                                                  mean, mean, mean, 
+                                                  mean, mean]; 
     renamecols = true);
 sort!(dt,:date_real);
 
@@ -125,12 +129,12 @@ y = DT_model[:,:SystemProduction];
 We need to load the `EvoTreeRegressor` algorithm, set the parameters, create the machine and cross validate the model using 5-folds repeating the operation for 5 times
 
 ```{julia}
-EvoTreeRegressor = MLJ.@load EvoTreeRegressor pkg=EvoTrees;
+EvoTreeRegressor = MLJ.@load EvoTreeRegressor pkg=EvoTrees verbosity=0;
 et_regressor = EvoTreeRegressor(nbins = 32, max_depth = 10, nrounds = 200);
 
 model_glm = et_regressor;
 mach_glm = machine(model_glm, X[train,:], y[train]);
-fit!(mach_glm);
+fit!(mach_glm, verbosity=0);
 
 # Cross-validation
 evaluate!(mach_glm, resampling = CV(nfolds=5, rng=1234), 
@@ -153,13 +157,16 @@ q2 = plot!(dt[:,:date_real],dt[:,:predicts_sum], mc = :orange, label = "Predict"
 q1 = scatter(dt[:,:SystemProduction_sum],dt[:,:predicts_sum], title = "Actual vs Predict", label = :none)
 q1 = plot!(collect(0:59000),collect(0:59000), label = :none, mc = :red)
 
-
 plot(q1, q2, layout=(1,2), size=(750,300))
 ```
-
 
 ```{julia}
 println("RMSE: ", string.(rmse(dt[:,:SystemProduction_sum],dt[:,:predicts_sum])))
 println("MAE: ", string.(mae(dt[:,:SystemProduction_sum],dt[:,:predicts_sum])))
 println("R²: ", string.(cor(dt[:,:SystemProduction_sum],dt[:,:predicts_sum]).^2))
 ```
+
+## References
+
+::: {#refs}
+:::
