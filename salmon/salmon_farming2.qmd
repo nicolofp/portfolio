@@ -91,7 +91,6 @@ where $u(w, t)$ represents the density of fish at weight $w$ and time $t$, $g(w)
 - **Extensions**: Add recruitment (boundary flux at $w_\min$), variable $\mu/g/h$, or stochasticity. For very large $n$, consider finite volume methods or characteristic-based solvers.
 - **Ecological Insight**: The model predicts sustainable yield if balanced with growth/recruitment (not here), or depletion patterns in batch harvesting farms.
 
-This approach is standard in fisheries modeling (e.g., via software like OSMOSE or custom PDE solvers) and aligns with structured population theory from ecology and applied math.
 
 ## References
 
