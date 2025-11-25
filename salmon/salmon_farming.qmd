@@ -2,12 +2,16 @@
 title: "Salmon farming model"
 subtitle: "Using Ordinary Differential Equation (ODE) with STAN to model the salmon farming dynamics"
 author: "Nicol&oacute; Foppa Pedretti"
-date: "2025-05-11"
+date: "today"
 format: 
   html:
     fontsize: smaller
     number-sections: true
     embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
 bibliography: salmon.bib
 csl: ieee.csl
 ---
@@ -43,16 +47,13 @@ $$\text{Fraction harvested} = P(w \geq 5) = 1 - \Phi\left(\frac{5 - W(t)}{\sqrt{
 + We express the post-harvest mean weight ($W_{\text{post}}$) and variance ($V_{\text{post}}$) as the conditional mean and variance of a Gaussian distribution truncated below 5kg because harvesting removes salmon with weights $w \geq 5\text{kg}$, leaving only those with $w<5\text{kg}$. We need to compute the mean and variance of this truncated Gaussian distribution for the remaining population (see @sec-appx for additional context)
 
 + In order to include the mean and variance of the harvested salmon weights as state variables in the salmon harvesting model, we need to track the mean weight ($W_{\text{harvested}}$) and variance ($V_{\text{harvested}}$) of the salmon with weights $w \geq 5\text{kg}$ over time. These new state variables will represent the cumulative mean and variance of the harvested salmon, updated as harvesting occurs. Since harvesting is a continuous process in the ODE system, we’ll model the dynamics of $W_{\text{harvested}}$ and $V_{\text{harvested}}$ by accumulating the contributions of harvested salmon, weighted by the harvesting rate. New State Variables: $W_{\text{harvested}}(t)$ (mean weight in kg of all salmon harvested up to time t), $V_{\text{harvested}}$ (variance of weights in kg^2^ of all salmon harvested up to time t). However we face some challenges because
-harvesting is modeled as a continuous rate, so $W_{\text{harvested}}$ and $V_{\text{harvested}}$ represent the average properties of the cumulative harvested population. The instantaneous mean and variance of harvested salmon at time t are given by the truncated Gaussian $w \geq 5$, but we need to track their cumulative effect. As a solution we introduce ODEs for the two parameters that update based on the instantaneous harvested mean and variance, we use an auxiliary state variable $$\frac{dN_{\text{harvested}}}{dt} = h \left[ 1 - \Phi\left(\frac{5 - W}{\sqrt{V}}\right) \right] N$$ to track the cumulative number of harvested salmon, which helps normalize the mean and variance calculations.
+harvesting is modeled as a continuous rate, so $W_{\text{harvested}}$ and $V_{\text{harvested}}$ represent the average properties of the cumulative harvested population. The instantaneous mean and variance of harvested salmon at time $t$ are given by the truncated Gaussian $w \geq 5$, but we need to track their cumulative effect. As a solution we introduce `ODEs` for the two parameters that update based on the instantaneous harvested mean and variance, we use an auxiliary state variable $$\frac{dN_{\text{harvested}}}{dt} = h \left[ 1 - \Phi\left(\frac{5 - W}{\sqrt{V}}\right) \right] N$$ to track the cumulative number of harvested salmon, which helps normalize the mean and variance calculations.
 
 
 + The instantaneous mean and variance of harvested salmon at time t, given $\alpha = \frac{5 - W(t)}{\sqrt{V(t)}}$, are: $$W_{\text{inst}}(t) = W(t) + \sqrt{V(t)} \cdot \frac{\phi(\alpha)}{1 - \Phi(\alpha)} \qquad \qquad V_{\text{inst}}(t) = V(t) \left[ 1 + \frac{\phi(\alpha) \cdot \alpha}{1 - \Phi(\alpha)} - \left( \frac{\phi(\alpha)}{1 - \Phi(\alpha)} \right)^2 \right]$$ which lead to \begin{array}{l}
 \frac{dW_{\text{harvested}}}{dt} = \frac{h \left[ 1 - \Phi\left(\frac{5 - W}{\sqrt{V}}\right) \right] N (W_{\text{inst}} - W_{\text{harvested}})}{N_{\text{harvested}} + \epsilon} \\
 \frac{dV_{\text{harvested}}}{dt} = \frac{h \left[ 1 - \Phi\left(\frac{5 - W}{\sqrt{V}}\right) \right] N [V_{\text{inst}} + (W_{\text{inst}} - W_{\text{harvested}})^2 - V_{\text{harvested}}]}{N_{\text{harvested}} + \epsilon}
 \end{array}
-
-
-
 
 
 ## Equation
@@ -65,6 +66,149 @@ harvesting is modeled as a continuous rate, so $W_{\text{harvested}}$ and $V_{\t
 \frac{dW_{\text{h}}}{dt} = \frac{h_r N (W_{\text{inst}} - W_{\text{h}})}{N_{\text{h}} + \epsilon} \\
 \frac{dV_{\text{h}}}{dt} = \frac{h_r N [V_{\text{inst}} + (W_{\text{inst}} - W_{\text{h}})^2 - V_{\text{h}}]}{N_{\text{h}} + \epsilon},
 \end{array}
+
+## `R` and `stan` code
+
+Ordinary differential equations (ODEs) model dynamic systems in physics, biology, and engineering, but analytical solutions are often infeasible for complex cases. For numerical approximation, we pair R with Stan, which provides efficient ODE solvers (bdf integrators) via interfaces such cmdstanr. This setup enables straightforward approximation of ODE trajectories in an open-source environment, without relying on Bayesian inference features.
+
+```{r}
+library(kableExtra)
+library(cmdstanr)
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+library(posterior)
+
+stan_file = "../salmon/farm_model.stan"
+mod <- cmdstan_model(stan_file)
+```
+
+In the context of ordinary differential equations (ODEs), initial conditions refer to the specified values of the dependent variables at the starting point of the independent variable, typically time t=0. These conditions are crucial for solving initial value problems, as they provide the necessary constraints to determine a unique solution trajectory from the differential equations, preventing ambiguity in the system's evolution
+
+```{r}
+# Initial state
+y0 <- c(50000,  # Number of fish
+        2.5,    # Mean weight of the initial population
+        0.5,    # Var weight of the initial population
+        0,      # Number of harvested fish
+        0,      # Mean weight of the harvested population
+        0.01)   # Var weight of the harvsted population
+
+# Time points for simulation (weeks)
+ts <- seq(from = 1, to = 52, by = 1)
+
+# Prepare data for Stan
+stan_data <- list(
+  T = length(ts),   # Number of weeks ahead
+  ts = ts,          # Vector of times
+  y0 = y0,          # initial conditions
+  h = 0.8,          # % of harvested fish over treshold 
+  gr = 0.05,        # growth ratio (%)
+  tw = 5,           # target weight (kg)
+  mu = 0.001,       # death rate (%)
+  W_max = 12,       # max weight allowed per fish (for growth equation)
+  sigma_g = 0.3     # sd of growth rate
+)
+```
+
+Run the simulation:
+
+```{r}
+fit <- mod$sample(
+  data = stan_data,
+  chains = 1,
+  iter_sampling = 1,
+  iter_warmup = 0,
+  fixed_param = TRUE,
+  refresh = 0
+)
+
+```
+
+Extract results:
+
+```{r}
+# Extract results
+draws_df <- fit$draws(format = "draws_df")
+
+# Process the results 
+farm_data <- data.frame(
+  time = ts,
+  num_salmon = numeric(length(ts)),
+  mean_weight = numeric(length(ts)),
+  var_weight = numeric(length(ts)),
+  har_salmon = numeric(length(ts)),
+  mean_weight_har_salmon = numeric(length(ts)),
+  var_weight_har_salmon = numeric(length(ts))
+)
+
+for (t in 1:length(ts)) {
+  farm_data$num_salmon[t] <- ceiling(draws_df[[paste0("y_hat[", t, ",1]")]])
+  farm_data$mean_weight[t] <- draws_df[[paste0("y_hat[", t, ",2]")]]
+  farm_data$var_weight[t] <- draws_df[[paste0("y_hat[", t, ",3]")]]
+  farm_data$har_salmon[t] <- floor(draws_df[[paste0("y_hat[", t, ",4]")]])
+  farm_data$mean_weight_har_salmon[t] <- draws_df[[paste0("y_hat[", t, ",5]")]]
+  farm_data$var_weight_har_salmon[t] <- draws_df[[paste0("y_hat[", t, ",6]")]]
+}
+
+farm_data = rbind(c(0,y0),farm_data)
+farm_data |>
+  head(n = 10) |>
+  kbl(format = "markdown") |>
+  kable_classic_2(full_width = F)
+```
+
+## Results
+
+
+
+```{r}
+#| fig-align: center
+#| fig-width: 12
+#| fig-height: 8
+#| echo: false
+
+p1 <- ggplot(farm_data, aes(x = time, y = num_salmon)) +
+  geom_line() +
+  geom_line(aes(x = time, y = har_salmon), color = "blue") +
+  labs(title = "Salmons over time", x = "Weeks", y = "Salmons") +
+  theme_bw() +
+  theme(plot.title = element_text(size = 18, hjust = 0.5))
+
+p4 <- ggplot(farm_data, aes(x = time, y = mean_weight_har_salmon*har_salmon)) +
+  geom_line() +
+  labs(title = "Harvested salmon - cumulative", x = "Days", y = "Biomass") +
+   geom_ribbon(aes(ymin = mean_weight_har_salmon*har_salmon - 
+                     1.96*har_salmon*sqrt(var_weight_har_salmon), 
+                   ymax = mean_weight_har_salmon*har_salmon 
+                   + 1.96*har_salmon*sqrt(var_weight_har_salmon)), 
+              fill = "grey70", alpha = 0.4) +
+  theme_bw() +
+  theme(plot.title = element_text(size = 18, hjust = 0.5))
+
+p2 <- ggplot(farm_data[-1,], aes(x = time, y = mean_weight_har_salmon)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = mean_weight_har_salmon - 1.96*sqrt(var_weight_har_salmon), 
+                  ymax = mean_weight_har_salmon + 1.96*sqrt(var_weight_har_salmon)), 
+              fill = "grey70", alpha = 0.4) + 
+  labs(title = "Harvested weight over time", x = "Weeks", y = "Weight (Kg)") +
+  ylim(c(0,7)) + 
+  theme_bw() +
+  theme(plot.title = element_text(size = 18, hjust = 0.5))
+
+p3 <- ggplot(farm_data, aes(x = time, y = mean_weight)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = mean_weight - 1.96*sqrt(var_weight), 
+                  ymax = mean_weight + 1.96*sqrt(var_weight)), 
+              fill = "grey70", alpha = 0.4) + 
+  labs(title = "Tank salmon weight over time", x = "Weeks", y = "Weight (Kg)") +
+  theme_bw() +
+  ylim(c(0,7)) + 
+  theme(plot.title = element_text(size = 18, hjust = 0.5))
+
+gridExtra::grid.arrange(p1,p4,p2,p3)
+```
+
 
 ## References
 

@@ -1,0 +1,100 @@
+---
+title: "Salmon farming model"
+subtitle: "Using Ordinary Differential Equation (ODE) with STAN to model the salmon farming dynamics"
+author: "Nicol&oacute; Foppa Pedretti"
+date: "today"
+format: 
+  html:
+    fontsize: smaller
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+bibliography: salmon.bib
+csl: ieee.csl
+---
+
+## Introduction
+
+The derived output is the total biomass of remaining salmon (kg), $B(t) = N(t) \cdot W(t)$. See [@https://doi.org/10.1002/aqc.4142], [@doi:10.1098/rsos.160152], [@PINCINATO2021736034]
+
+## Model
+
+A size-structured population model is appropriate for describing this scenario. This type of model tracks the density of fish as a function of their size (or weight) over time, incorporating individual growth, natural mortality, and a harvesting term that applies only to fish exceeding the specified weight threshold.
+
+A common formulation uses a **partial differential equation** (PDE) similar to the following:
+
+$$
+\frac{\partial u(w, t)}{\partial t} + \frac{\partial (g(w) u(w, t))}{\partial w} = -\mu(w) u(w, t) - h(w) u(w, t),
+$$
+
+where:
+
++ $u(w, t)$ is the density of fish at weight $w$ and time $t$,
++ $g(w)$ is the growth rate in weight (e.g., based on von Bertalanffy growth: $g(w) = a - b w$),
++ $\mu(w)$ is the natural mortality rate,
++ $h(w)$ is the harvesting rate, set to 0 for $w$ below the threshold and a positive value (e.g., constant or effort-dependent) for $w$ above it.
+
+The initial condition is $u(w, 0) = u_0(w)$, representing the starting weight distribution of the population. Boundary conditions handle recruitment (if any; set to zero if no reproduction) at the smallest weight.
+
+This PDE framework (advection-reaction type) allows fish to "move" through weight classes as they grow, with selective removal only for larger individuals, matching the farm harvesting process. Discretized versions (e.g., into weight bins) are also used for computational simplicity in practice.
+
+## Code 
+
+The R code implements a numerical solution to the size-structured population model described by the partial differential equation (PDE):
+
+$$\frac{\partial u(w, t)}{\partial t} + \frac{\partial (g(w) u(w, t))}{\partial w} = -\mu(w) u(w, t) - h(w) u(w, t)$$
+
+where $u(w, t)$ represents the density of fish at weight $w$ and time $t$, $g(w)$ is the weight-specific growth rate, $\mu(w)$ is the natural mortality rate, and $h(w)$ is the size-selective harvesting rate (zero below a threshold weight and positive above it). This equation models how the population distribution evolves over time due to individual growth (advection term), death, and harvesting (reaction terms). It assumes no reproduction or recruitment in this closed farm system, focusing on the initial cohort's dynamics.
+
+### Key Theoretical Concepts
+1. **PDE Type and Interpretation**:
+   - This is a first-order hyperbolic PDE, specifically an advection-reaction equation. The advection term $\frac{\partial (g u)}{\partial w}$ describes the "flow" of individuals through weight space as they grow, akin to a continuity equation in fluid dynamics where density is conserved along characteristics (growth trajectories).
+   - Along characteristic curves defined by $dw/dt = g(w)$, the solution satisfies an ODE: $du/dt = -u (\partial g / \partial w + \mu + h)$, reflecting dilution due to growth spread, mortality, and harvesting.
+   - In a fish farm context, this captures selective harvesting: smaller fish grow into harvestable sizes, but only those above the threshold are removed, leading to a shifting and depleting size distribution.
+
+2. **Method of Lines (MOL)**:
+   - The code uses MOL to solve the PDE numerically. This semi-discrete approach discretizes the spatial (weight) dimension $w$ into a finite grid of $n$ bins (points $w_i$ from $w_\min$ to $w_\max$, with uniform spacing $dw$), converting the PDE into a system of $n$ ordinary differential equations (ODEs) in time $t$.
+   - Each ODE approximates $du_i/dt$ for the density $u_i(t) \approx u(w_i, t)$ in bin $i$.
+   - MOL is efficient for such problems because it leverages robust ODE solvers (here, `deSolve::ode()`, which defaults to LSODA for stiff/non-stiff systems) to handle time integration, while spatial discretization can be tailored to the advection-dominated nature.
+
+3. **Spatial Discretization Scheme**:
+   - The advection term is approximated using a first-order upwind finite difference scheme, suitable for hyperbolic equations with positive advection speed ($g(w) > 0$, as fish grow from small to large weights).
+   - For the interior points ($i = 2$ to $n$): $$-\frac{\partial (g u)}{\partial w} \bigg|_{w_i} \approx -\frac{g_i u_i - g_{i-1} u_{i-1}}{dw} = \frac{g_{i-1} u_{i-1} - g_i u_i}{dw}$$
+     This is "upwind" because it uses information from the upstream direction (lower weights), ensuring numerical stability by respecting the direction of information propagation (CFL condition implicitly satisfied for small time steps in the ODE solver).
+   - For the first bin ($i=1$): $$-\frac{\partial (g u)}{\partial w} \bigg|_{w_1} \approx -\frac{g_1 u_1 - g_0 u_0}{dw}$$
+     Assuming no influx at the boundary ($g_0 u_0 = 0$, as there's no recruitment from below $w_\min$), it simplifies to $-g_1 u_1 / dw$.
+   - The reaction terms $-\mu u - h u$ are evaluated pointwise at each $w_i$, as they don't involve derivatives.
+   - This scheme is first-order accurate in space ($O(dw)$), introducing some numerical diffusion (smearing of sharp fronts), but it's simple and stable. For higher accuracy, one could use higher-order schemes (e.g., Lax-Wendroff), but upwind is robust for advection-dominated problems to avoid oscillations.
+
+4. **Boundary and Initial Conditions**:
+   - **Boundary**: Dirichlet-like at $w_\min$ with zero influx (no new small fish entering). At $w_\max$, the scheme implicitly allows outflow if $g(w_\max) > 0$, but in practice, with von Bertalanffy growth $g(w) = a - b w$ approaching zero at large $w$, buildup is minimal.
+   - **Initial**: A lognormal distribution for $u(w, 0)$, common for size spectra in ecology. It's normalized so the integral $\int u_0(w) dw \approx \sum u_0[i] \cdot dw = N_0$ (total initial population), approximated via discrete summation.
+
+5. **Growth Model**:
+   - $g(w) = a - b w$ is a linear approximation derived from the von Bertalanffy equation $dL/dt = r (L_\infty - L)$, converted to weight assuming allometric scaling ($w \propto L^3$). It implies asymptotic growth, with $g$ decreasing as weight increases.
+
+6. **Harvesting and Mortality**:
+   - $h(w)$ is a step function: zero below $w_{harvest}$, constant $H$ above, modeling size-selective removal.
+   - $\mu(w)$ is constant here, but could be size-dependent in extensions.
+
+7. **Numerical Integration and Outputs**:
+   - The ODE system is stiff (due to potentially large gradients from harvesting), so LSODA adaptively switches between explicit (Adams) and implicit (BDF) methods.
+   - Total population $N(t) \approx \sum u_i(t) \cdot dw$ declines due to mortality and harvesting.
+   - Plots visualize dynamics: time series of $N(t)$, initial/final densities, and a heatmap of $u(w,t)$ showing evolution (e.g., mode shifting rightward as fish grow, then truncating at harvest threshold).
+
+### Limitations and Extensions
+- **Accuracy**: First-order scheme may diffuse sharp discontinuities (e.g., at harvest threshold). Increase $n$ for better resolution, but computational cost rises as $O(n)$.
+- **Stability**: Upwind ensures monotonicity and positivity preservation if $dw$ is chosen appropriately relative to $g$; ODE solver handles time steps.
+- **Extensions**: Add recruitment (boundary flux at $w_\min$), variable $\mu/g/h$, or stochasticity. For very large $n$, consider finite volume methods or characteristic-based solvers.
+- **Ecological Insight**: The model predicts sustainable yield if balanced with growth/recruitment (not here), or depletion patterns in batch harvesting farms.
+
+This approach is standard in fisheries modeling (e.g., via software like OSMOSE or custom PDE solvers) and aligns with structured population theory from ecology and applied math.
+
+## References
+
+::: {#refs}
+:::
+

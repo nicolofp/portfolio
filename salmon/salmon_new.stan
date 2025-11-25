@@ -71,11 +71,11 @@ model {
 generated quantities {
   // Solve the ODE system
   array[T] vector[6] y_hat = ode_bdf(ode_system, y0, t0, ts, h, gr, mu, tw, W_max, sigma_g);
-  //for (t in 1:T) {
-  //  y_hat[t, 1] += normal_rng(0, 0.1);
-  //  y_hat[t, 2] += normal_rng(0, 0.1);
-  //  y_hat[t, 3] += normal_rng(0, 0.1);
-  //  y_hat[t, 4] += normal_rng(0, 0.1);
-  //  y_hat[t, 5] += normal_rng(0, 0.1);
-  //}
+  // for (t in 1:T) {
+  //   y_hat[t, 1] += normal_rng(0, 0.5);
+  //   y_hat[t, 2] += normal_rng(0, 0.5);
+  //   y_hat[t, 3] += normal_rng(0, 0.5);
+  //   y_hat[t, 4] += normal_rng(0, 0.5);
+  //   y_hat[t, 5] += normal_rng(0, 0.5);
+  // }
 }
