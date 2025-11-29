@@ -1,0 +1,162 @@
+---
+title: "Salmon farming model"
+subtitle: "Using `Julia` Monte Carlo simulation for salmon farming dynamics"
+author: "Nicol&oacute; Foppa Pedretti"
+date: "today"
+format: 
+  html:
+    fontsize: smaller
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+bibliography: salmon.bib
+csl: ieee.csl
+---
+
+## Introduction
+
+The derived output is the total biomass of remaining salmon (kg), $B(t) = N(t) \cdot W(t)$. See [@https://doi.org/10.1002/aqc.4142], [@doi:10.1098/rsos.160152], [@PINCINATO2021736034]
+
+## Stochastic Model for Fish Farming with Size-Selective Harvesting
+ 
+We'll design a mathematical model for a fish farming system using a **Stochastic Differential Equation** (SDE) to capture the uncertainty in growth (e.g., due to environmental fluctuations, feeding variability, or individual differences). The key assumptions based on your query are:
+
++ No new fish are added to the tank (no recruitment or stocking).
++ Initial population: Assume $N_0$ fish at time $t=0$, each with initial weights drawn from some distribution (e.g., uniform or normal below the harvest threshold).
++ Fish grow individually, but independently (no interactions like competition for resources, to keep it simple; this can be extended).
++ Harvesting: Fish exceeding a specific weight threshold $W_h$ are regularly harvested. To model this in continuous time, we'll treat harvesting as an absorption event—once a fish's weight hits $W_h$, it's removed (harvested). This assumes frequent monitoring, aligning with "regular" harvests.
++ Stochasticity: Incorporated via noise in growth, representing unpredictable factors.
+
+This setup leads to an evolving distribution of fish weights over time, with the population declining as fish are harvested. The model is individualistic (each fish follows its own SDE path), but we can aggregate to describe the population-level distribution.
+
+Each fish's weight $X_t$ (for $t \geq 0$) follows a stochastic logistic growth model, which is common in ecology for bounded growth with noise. The deterministic part reflects logistic growth toward a maximum weight $K$ (carrying capacity per fish), while the stochastic part adds multiplicative noise for realism.
+
+The SDE is:
+$$dX_t = r X_t \left(1 - \frac{X_t}{K}\right) dt + \sigma X_t \, dW_t, \quad X_0 = x_0 < W_h$$
+where:
+- $r > 0$: Intrinsic growth rate (e.g., 0.1 per day, tunable based on species).
+- $K > W_h > 0$: Asymptotic maximum weight (e.g., $K = 5$ kg if $W_h = 3$ kg).
+- $\sigma > 0$: Volatility parameter for noise intensity (e.g., 0.05 for mild fluctuations).
+- $W_t$: Standard Wiener process (Brownian motion), introducing randomness.
+- Harvesting rule: The process stops (fish is harvested) when $X_t \geq W_h$. This is an absorbing barrier at $W_h$.
+
+This SDE is a stochastic version of the Verhulst logistic equation. The drift term $r X_t (1 - X_t/K)$ promotes growth when $X_t < K$ but slows as $X_t$ approaches $K$. The diffusion term $\sigma X_t dW_t$ makes growth proportional to current weight, which is biologically plausible (larger fish have more variable growth).
+
+**Notes on extensions**:
+
++ For more fish-specific growth, replace with a stochastic von Bertalanffy model: $dX_t = \eta (L^\gamma - X_t^\gamma)^{1/\gamma} dt + \sigma X_t^\delta dW_t$, where $\gamma \approx 1/3$ for weight (since weight $\propto$ length^3), and $L$ is max "length-equivalent." But logistic is simpler and often sufficient.
++ If environmental noise affects all fish similarly, use a common $W_t$; for individual variability, independent $W_t$ per fish.
+
+## Numerical Simulation of the Fish Farming SDE Model 
+
+To simulate the SDE model numerically, I used the Euler-Maruyama method, a standard approximation for SDEs. The model is:
+
+$$dX_t = r X_t \left(1 - \frac{X_t}{K}\right) dt + \sigma X_t \, dW_t$$
+
+with absorption (harvesting) when \(X_t \geq W_h\). Each fish evolves independently until harvested.
+
+#### Simulation Parameters
+- Number of fish (\(N_0\)): 1000
+- Growth rate (\(r\)): 0.1 per day
+- Carrying capacity (\(K\)): 5.0 kg
+- Volatility (\(\sigma\)): 0.05 (mild noise)
+- Harvest threshold (\(W_h\)): 3.0 kg
+- Initial weights: Uniformly distributed between 0.5 and 1.0 kg
+- Time horizon (\(T\)): 365 days
+- Time step (\(dt\)): 7 days (for numerical accuracy)
+
+The simulation tracks the evolving weights, removes harvested fish, and computes statistics. Note that due to stochasticity, results vary slightly across runs; this is one representative realization.
+
+```{julia}
+using Statistics, Distributions, LinearAlgebra, Random, Plots
+
+function simulate_fish(N0::Int, r::Float64, K::Float64, sigma::Float64, Wh::Float64,
+                       mu::Float64, T::Float64, dt::Float64)
+    rng = MersenneTwister(90)
+    times = collect(0.0:dt:T)
+    X = rand(rng, Uniform(0.5, 1.0), N0)
+    remaining = trues(N0)
+    results = []
+    harvest_times = Float64[]
+    death_times = Float64[]
+
+    for t_idx in 2:length(times)
+        t = times[t_idx]
+        if !any(remaining)
+            break
+        end
+
+        rem_idx = findall(remaining)
+        num_rem = length(rem_idx)
+        dW = sqrt(dt) * randn(rng, num_rem)
+        X_rem = X[rem_idx]
+        drift = r .* X_rem .* (1 .- X_rem / K)
+        diff = sigma .* X_rem .* dW
+        X_rem .+= drift .* dt .+ diff
+        X_rem = max.(X_rem, 0.0)
+        X[rem_idx] = X_rem
+
+        # Harvest check
+        harvested = X_rem .>= Wh
+        if any(harvested)
+            append!(harvest_times, fill(t, count(harvested)))
+            remaining[rem_idx[harvested]] .= false
+        end
+
+        # Update rem_idx after harvest
+        rem_idx = findall(remaining)
+        num_rem = length(rem_idx)
+
+        # Mortality
+        if num_rem > 0
+            deaths = rand(rng, num_rem) .< mu * dt
+            if any(deaths)
+                append!(death_times, fill(t, count(deaths)))
+                remaining[rem_idx[deaths]] .= false
+            end
+        end
+    end
+
+    # Fill remaining track times if early stop
+    while length(results) < length(track_times)
+        push!(results, (track_times[length(results) + 1], 0, NaN))
+    end
+
+    println("Simulation results:")
+    for (time, rem, mean_w) in results
+        mean_str = isnan(mean_w) ? "-" : string(round(mean_w, digits=2))
+        println("Time: $time.0, Remaining: $rem, Mean Weight: $mean_str")
+    end
+
+    if !isempty(harvest_times)
+        avg_harvest_time = mean(harvest_times)
+        println("Average time to harvest (for harvested fish): $(round(avg_harvest_time, digits=2)) days")
+    else
+        println("No fish harvested")
+    end
+
+    total_harvested = length(harvest_times)
+    total_died = length(death_times)
+    final_t = !any(remaining) ? times[end] : T  # Approximate
+    println("Total harvested: $total_harvested")
+    println("Total died: $total_died")
+    println("Tank empty at time: $(round(final_t, digits=1)) days")
+
+    return results, harvest_times, death_times
+end
+
+# Example call
+simulate_fish(1000, 0.1, 5.0, 0.05, 3.0, 0.001, 365.0, 0.01)
+
+```
+
+## References
+
+::: {#refs}
+:::
+
+
+
